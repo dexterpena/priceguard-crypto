@@ -2,7 +2,7 @@ services:
   - type: web
     name: priceguard-crypto
     env: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /
@@ -31,7 +31,7 @@ services:
   - type: cron
     name: priceguard-scheduler
     env: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     schedule: "0 * * * *"
     startCommand: python -c "from tasks.alert_tasks import check_all_alerts; check_all_alerts()"
