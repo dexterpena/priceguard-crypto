@@ -1,0 +1,57 @@
+services:
+  # Main Web Application
+  - type: web
+    name: priceguard-crypto
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.14
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: FLASK_SECRET_KEY
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: COINDESK_API
+        sync: false
+      - key: APP_URL
+        sync: false
+
+  # Background Scheduler (Cron Jobs)
+  - type: cron
+    name: priceguard-scheduler
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 * * * *"
+    startCommand: python -c "from tasks.alert_tasks import check_all_alerts; check_all_alerts()"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.14
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: COINDESK_API
+        sync: false

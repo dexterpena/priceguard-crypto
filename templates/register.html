@@ -1,0 +1,136 @@
+{% extends "base.html" %} {% block title %}Register - PriceGuard{% endblock %}
+{% block content %}
+<div class="container">
+  <div
+    class="row justify-content-center align-items-center"
+    style="min-height: calc(100vh - 56px)"
+  >
+    <div class="col-md-5">
+      <div class="card shadow-lg">
+        <div class="card-body p-5">
+          <div class="text-center mb-4">
+            <i
+              class="bi bi-currency-bitcoin text-primary"
+              style="font-size: 3rem"
+            ></i>
+            <h2 class="mt-3">Create Account</h2>
+            <p class="text-muted">Start tracking crypto prices today</p>
+          </div>
+
+          <form id="registerForm">
+            <div class="mb-3">
+              <label for="email" class="form-label">Email</label>
+              <input
+                type="email"
+                class="form-control form-control-lg"
+                id="email"
+                required
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="password" class="form-label">Password</label>
+              <input
+                type="password"
+                class="form-control form-control-lg"
+                id="password"
+                required
+                minlength="6"
+              />
+              <div class="form-text">Must be at least 6 characters</div>
+            </div>
+
+            <div class="mb-3">
+              <label for="confirmPassword" class="form-label"
+                >Confirm Password</label
+              >
+              <input
+                type="password"
+                class="form-control form-control-lg"
+                id="confirmPassword"
+                required
+              />
+            </div>
+
+            <div class="d-grid">
+              <button
+                type="submit"
+                class="btn btn-primary btn-lg"
+                id="registerBtn"
+              >
+                <span id="registerBtnText">Create Account</span>
+                <span id="registerBtnSpinner" class="loading d-none"></span>
+              </button>
+            </div>
+          </form>
+
+          <div class="text-center mt-4">
+            <p class="mb-0">
+              Already have an account?
+              <a href="/login" class="text-decoration-none">Login</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  // Redirect if already logged in
+  if (getAuthToken()) {
+    window.location.href = "/";
+  }
+
+  document
+    .getElementById("registerForm")
+    .addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+      const confirmPassword = document.getElementById("confirmPassword").value;
+
+      if (password !== confirmPassword) {
+        alert("Passwords do not match");
+        return;
+      }
+
+      const registerBtn = document.getElementById("registerBtn");
+      const registerBtnText = document.getElementById("registerBtnText");
+      const registerBtnSpinner = document.getElementById("registerBtnSpinner");
+
+      // Show loading state
+      registerBtn.disabled = true;
+      registerBtnText.classList.add("d-none");
+      registerBtnSpinner.classList.remove("d-none");
+
+      try {
+        const response = await fetch(`${API_BASE}/auth/signup`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          alert("Registration successful! You can now login.");
+          window.location.href = "/login";
+        } else {
+          alert(data.error || "Registration failed");
+        }
+      } catch (error) {
+        console.error("Registration error:", error);
+        alert("An error occurred during registration");
+      } finally {
+        // Reset button state
+        registerBtn.disabled = false;
+        registerBtnText.classList.remove("d-none");
+        registerBtnSpinner.classList.add("d-none");
+      }
+    });
+</script>
+{% endblock %}
