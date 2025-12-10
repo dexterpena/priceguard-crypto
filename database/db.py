@@ -44,12 +44,15 @@ class SupabaseDB:
         """Get user's watchlist with cached crypto info and live prices"""
         try:
             watchlist = []
+            # Choose client for watchlist and enrichment queries
+            data_client = self.service_client if self.service_client else self.client
 
             # Try anon client with user token first (RLS)
             if user_token:
                 try:
-                    self.client.postgrest.auth(user_token)
-                    response = self.client.table('watchlist').select(
+                    data_client = self.client  # anon client with token
+                    data_client.postgrest.auth(user_token)
+                    response = data_client.table('watchlist').select(
                         '*'
                     ).eq('user_id', user_id).order('date_added', desc=True).execute()
                     watchlist = response.data or []
@@ -59,7 +62,8 @@ class SupabaseDB:
 
             # Fallback to service client if available or if no items returned
             if self.service_client and (not watchlist):
-                response = self.service_client.table('watchlist').select(
+                data_client = self.service_client
+                response = data_client.table('watchlist').select(
                     '*'
                 ).eq('user_id', user_id).order('date_added', desc=True).execute()
                 watchlist = response.data or []
@@ -72,7 +76,7 @@ class SupabaseDB:
                 api_crypto_id = item['api_crypto_id']
 
                 # Get latest price from popular_cryptos cache
-                crypto_cache = self.client.table('popular_cryptos').select(
+                crypto_cache = data_client.table('popular_cryptos').select(
                     'price', 'change_24h', 'market_cap', 'volume_24h'
                 ).eq('api_id', api_crypto_id).execute()
 
