@@ -40,17 +40,32 @@ class SupabaseDB:
 
     # Watchlist Operations
 
-    def get_user_watchlist(self, user_id: str) -> list[dict]:
+    def get_user_watchlist(self, user_id: str, user_token: str | None = None) -> list[dict]:
         """Get user's watchlist with cached crypto info and live prices"""
         try:
-            # Get watchlist with cached data
-            response = self.client.table('watchlist').select(
-                '*'
-            ).eq('user_id', user_id).order('date_added', desc=True).execute()
+            watchlist = []
 
-            watchlist = response.data
-            logger.info(
-                f"Found {len(watchlist)} watchlist items for user {user_id}")
+            # Try anon client with user token first (RLS)
+            if user_token:
+                try:
+                    self.client.postgrest.auth(user_token)
+                    response = self.client.table('watchlist').select(
+                        '*'
+                    ).eq('user_id', user_id).order('date_added', desc=True).execute()
+                    watchlist = response.data or []
+                    logger.info(f"Watchlist fetched via user token: {len(watchlist)} items")
+                except Exception as e:
+                    logger.warning(f"Anon watchlist fetch failed, will try service client: {e}")
+
+            # Fallback to service client if available or if no items returned
+            if self.service_client and (not watchlist):
+                response = self.service_client.table('watchlist').select(
+                    '*'
+                ).eq('user_id', user_id).order('date_added', desc=True).execute()
+                watchlist = response.data or []
+                logger.info(f"Watchlist fetched via service role: {len(watchlist)} items")
+
+            logger.info(f"Found {len(watchlist)} watchlist items for user {user_id}")
 
             # Enrich with latest prices from cache
             for item in watchlist:
@@ -95,7 +110,9 @@ class SupabaseDB:
     def get_user_watched_crypto_ids(self, user_id: str) -> list[int]:
         """Get list of api_crypto_ids that user is watching"""
         try:
-            response = self.client.table('watchlist').select(
+            client = self.service_client if self.service_client else self.client
+            # No user_token here; used for UI state only, RLS covered by service role or anon token not needed
+            response = client.table('watchlist').select(
                 'api_crypto_id'
             ).eq('user_id', user_id).execute()
             return [item['api_crypto_id'] for item in response.data]

@@ -411,7 +411,11 @@ def get_crypto_history(symbol):
 def get_watchlist(user_id):
     """Get user's watchlist with crypto data"""
     try:
-        watchlist = db.get_user_watchlist(user_id)
+        # Use token for RLS when service role unavailable
+        auth_header = request.headers.get('Authorization', '')
+        user_token = auth_header.split(' ')[1] if auth_header.startswith('Bearer ') else None
+
+        watchlist = db.get_user_watchlist(user_id, user_token=user_token)
 
         # Evaluate alert thresholds and notify when triggered (respect preferences)
         try:

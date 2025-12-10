@@ -30,7 +30,7 @@ services:
         sync: false
 
   - type: cron
-    name: priceguard-scheduler
+    name: priceguard-crypto-scheduler
     env: python
     plan: starter
     autoDeploy: true
