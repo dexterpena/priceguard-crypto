@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from supabase import Client, create_client
+from supabase.lib.client_options import ClientOptions
 
 from config import Config
 
@@ -16,9 +17,14 @@ class SupabaseDB:
             Config.SUPABASE_URL,
             Config.SUPABASE_KEY
         )
+        # Create service client with proper options for server-side admin operations
         self.service_client: Client = create_client(
             Config.SUPABASE_URL,
-            Config.SUPABASE_SERVICE_KEY
+            Config.SUPABASE_SERVICE_KEY,
+            options=ClientOptions(
+                auto_refresh_token=False,
+                persist_session=False
+            )
         ) if Config.SUPABASE_SERVICE_KEY else None
 
     def get_user_email(self, user_id: str) -> Optional[str]:
@@ -37,7 +43,7 @@ class SupabaseDB:
             logger.error(f"Error getting user email: {e}")
             return None
 
-    # ==================== Crypto Operations ====================
+    # Crypto Operations
 
     def get_crypto_by_symbol(self, symbol: str) -> Optional[Dict]:
         """Get crypto by symbol"""
@@ -80,7 +86,7 @@ class SupabaseDB:
             logger.error(f"Error adding crypto: {e}")
             return None
 
-    # ==================== Watchlist Operations ====================
+    # Watchlist Operations
 
     def get_user_watchlist(self, user_id: str) -> List[Dict]:
         """Get user's watchlist with crypto details and latest prices"""
@@ -167,7 +173,7 @@ class SupabaseDB:
             logger.error(f"Error updating alert threshold: {e}")
             return False
 
-    # ==================== Price History Operations ====================
+    # Price History Operations
 
     def get_latest_price(self, crypto_id: int) -> Optional[Dict]:
         """Get latest price for a crypto"""
@@ -244,7 +250,7 @@ class SupabaseDB:
             logger.error(f"Error bulk inserting price history: {e}")
             return False
 
-    # ==================== Alerts Operations ====================
+    # Alerts Operations
 
     def log_alert(self, user_id: str, crypto_id: int, trigger_price: float,
                   percent_change: float, alert_type: str) -> Optional[Dict]:
@@ -288,7 +294,7 @@ class SupabaseDB:
             logger.error(f"Error getting all watchlist items: {e}")
             return []
 
-    # ==================== User Preferences ====================
+    # User Preferences
 
     def get_user_preferences(self, user_id: str) -> Optional[Dict]:
         """Get user preferences"""
@@ -336,5 +342,4 @@ class SupabaseDB:
             return False
 
 
-# Singleton instance
 db = SupabaseDB()
