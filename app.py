@@ -484,6 +484,11 @@ def get_preferences(user_id):
     """Get user preferences"""
     try:
         prefs = db.get_user_preferences(user_id)
+        # prefer token-auth read for prefs to avoid RLS issues
+        try:
+            prefs = db.get_user_preferences(user_id, user_token=user_token)
+        except Exception:
+            prefs = db.get_user_preferences(user_id)
         return jsonify(prefs or {}), 200
     except Exception as e:
         logger.error(f"Error getting preferences: {e}")

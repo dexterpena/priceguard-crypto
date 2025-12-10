@@ -44,15 +44,14 @@ class SupabaseDB:
         """Get user's watchlist with cached crypto info and live prices"""
         try:
             watchlist = []
-            # Choose client for watchlist and enrichment queries
-            data_client = self.service_client if self.service_client else self.client
+            # Base client for enrichment (prefer service role)
+            enrich_client = self.service_client if self.service_client else self.client
 
             # Try anon client with user token first (RLS)
             if user_token:
                 try:
-                    data_client = self.client  # anon client with token
-                    data_client.postgrest.auth(user_token)
-                    response = data_client.table('watchlist').select(
+                    self.client.postgrest.auth(user_token)
+                    response = self.client.table('watchlist').select(
                         '*'
                     ).eq('user_id', user_id).order('date_added', desc=True).execute()
                     watchlist = response.data or []
@@ -62,8 +61,7 @@ class SupabaseDB:
 
             # Fallback to service client if available or if no items returned
             if self.service_client and (not watchlist):
-                data_client = self.service_client
-                response = data_client.table('watchlist').select(
+                response = self.service_client.table('watchlist').select(
                     '*'
                 ).eq('user_id', user_id).order('date_added', desc=True).execute()
                 watchlist = response.data or []
@@ -76,29 +74,40 @@ class SupabaseDB:
                 api_crypto_id = item['api_crypto_id']
 
                 # Get latest price from popular_cryptos cache
-                crypto_cache = data_client.table('popular_cryptos').select(
-                    'price', 'change_24h', 'market_cap', 'volume_24h'
-                ).eq('api_id', api_crypto_id).execute()
+                try:
+                    if enrich_client is self.client:
+                        try:
+                            enrich_client.postgrest.auth(None)
+                        except Exception:
+                            pass
+                    crypto_cache = enrich_client.table('popular_cryptos').select(
+                        'price', 'change_24h', 'market_cap', 'volume_24h'
+                    ).eq('api_id', api_crypto_id).execute()
 
-                if crypto_cache.data and len(crypto_cache.data) > 0:
-                    cached_data = crypto_cache.data[0]
-                    item['current_price'] = float(cached_data['price'])
-                    item['change_24h'] = float(
-                        cached_data.get('change_24h', 0))
-                    item['market_cap'] = float(
-                        cached_data.get('market_cap', 0))
-                    item['volume_24h'] = float(
-                        cached_data.get('volume_24h', 0))
-                    logger.info(
-                        f"{item['symbol']}: price=${cached_data['price']}, change={cached_data.get('change_24h', 0)}%")
-                else:
-                    # Fallback: fetch from API
-                    logger.warning(
-                        f"No cached price for {item['symbol']} (api_id={api_crypto_id}), will use API")
-                    item['current_price'] = 0
-                    item['change_24h'] = 0
-                    item['market_cap'] = 0
-                    item['volume_24h'] = 0
+                    if crypto_cache.data and len(crypto_cache.data) > 0:
+                        cached_data = crypto_cache.data[0]
+                        item['current_price'] = float(cached_data['price'])
+                        item['change_24h'] = float(
+                            cached_data.get('change_24h', 0))
+                        item['market_cap'] = float(
+                            cached_data.get('market_cap', 0))
+                        item['volume_24h'] = float(
+                            cached_data.get('volume_24h', 0))
+                        logger.info(
+                            f"{item['symbol']}: price=${cached_data['price']}, change={cached_data.get('change_24h', 0)}%")
+                    else:
+                        logger.warning(
+                            f"No cached price for {item['symbol']} (api_id={api_crypto_id}), will use defaults")
+                        item['current_price'] = 0
+                        item['change_24h'] = 0
+                        item['market_cap'] = 0
+                        item['volume_24h'] = 0
+                except Exception as enrich_err:
+                    logger.warning(f"Enrichment failed for {item.get('symbol')}: {enrich_err}")
+                    item['current_price'] = item.get('current_price', 0)
+                    item['change_24h'] = item.get('change_24h', 0)
+                    item['market_cap'] = item.get('market_cap', 0)
+                    item['volume_24h'] = item.get('volume_24h', 0)
 
             # Sort by market cap descending to match popular cryptos
             watchlist.sort(
@@ -224,10 +233,23 @@ class SupabaseDB:
 
     # User Preferences
 
-    def get_user_preferences(self, user_id: str) -> dict | None:
+    def get_user_preferences(self, user_id: str, user_token: str | None = None) -> dict | None:
         """Fetch or create default user preferences"""
         try:
-            response = self.client.table('user_preferences').select(
+            # Try anon client with token first
+            if user_token:
+                try:
+                    self.client.postgrest.auth(user_token)
+                    response = self.client.table('user_preferences').select(
+                        '*').eq('user_id', user_id).execute()
+                    if response.data:
+                        return response.data[0]
+                except Exception as e:
+                    logger.warning(f"Anon preferences fetch failed, will try service client: {e}")
+
+            # Fallback to service client if available
+            client = self.service_client if self.service_client else self.client
+            response = client.table('user_preferences').select(
                 '*').eq('user_id', user_id).execute()
             if response.data:
                 return response.data[0]
@@ -239,7 +261,8 @@ class SupabaseDB:
     def create_user_preferences(self, user_id: str) -> dict | None:
         """Create default preferences for a user"""
         try:
-            response = self.client.table('user_preferences').insert({
+            client = self.service_client if self.service_client else self.client
+            response = client.table('user_preferences').insert({
                 'user_id': user_id,
                 'email_alerts_enabled': True,
                 'daily_summary_enabled': True,
