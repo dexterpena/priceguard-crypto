@@ -16,5 +16,8 @@ ENV/
 .vscode/
 
 # Charts and predictions
-static/charts/*.png
-static/predictions/*.png
+static/charts/*
+static/predictions/*
+
+# Local docs
+DEPLOY_RENDER.md

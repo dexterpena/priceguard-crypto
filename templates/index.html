@@ -374,6 +374,7 @@
               style="max-height: 300px; overflow-y: auto; display: none"
             ></div>
             <input type="hidden" id="selectedCryptoSymbol" />
+            <input type="hidden" id="selectedCryptoId" />
             <input type="hidden" id="selectedCryptoName" />
             <div id="selectedCrypto" class="mt-2" style="display: none">
               <div class="alert alert-info d-flex align-items-center">
@@ -491,7 +492,14 @@
         return;
       }
 
-      watchlistData = data;
+      // Sort by market cap descending for display and reuse
+      const sortedData = [...data].sort((a, b) => {
+        const aCap = parseFloat(a.market_cap) || 0;
+        const bCap = parseFloat(b.market_cap) || 0;
+        return bCap - aCap;
+      });
+
+      watchlistData = sortedData;
 
       // Hide loading and reset all states
       document.getElementById("watchlistLoading").classList.add("d-none");
@@ -504,8 +512,8 @@
       } else {
         console.log(`Watchlist has ${data.length} items`);
         document.getElementById("watchlistContent").classList.remove("d-none");
-        renderWatchlist(data);
-        populateCryptoSelector(data);
+        renderWatchlist(sortedData);
+        populateCryptoSelector(sortedData);
       }
     } catch (error) {
       console.error("Error loading watchlist:", error);
@@ -524,13 +532,16 @@
     console.log("Rendering watchlist with data:", data);
 
     data.forEach((item) => {
-      const crypto = item.cryptos;
+      // In new schema, crypto info is directly in the watchlist item
+      const symbol = item.symbol;
+      const name = item.name;
+      const logoUrl = item.logo_url;
       const price = item.current_price || 0;
       const change = item.change_24h || 0;
       const marketCap = item.market_cap || 0;
 
       console.log(
-        `${crypto.symbol}: price=${price}, change=${change}, marketCap=${marketCap}`
+        `${symbol}: price=${price}, change=${change}, marketCap=${marketCap}`
       );
 
       const changeClass = change >= 0 ? "price-positive" : "price-negative";
@@ -540,14 +551,17 @@
                 <tr>
                     <td>
                         <div class="d-flex align-items-center">
-                            <div class="crypto-symbol me-3">
-                                ${crypto.symbol.substring(0, 3)}
-                            </div>
+                            ${
+                              logoUrl
+                                ? `<img src="${logoUrl}" alt="${symbol}" style="width: 32px; height: 32px; margin-right: 8px; border-radius: 50%;" onerror="this.style.display='none'">`
+                                : `<div class="crypto-symbol me-3">${symbol.substring(
+                                    0,
+                                    3
+                                  )}</div>`
+                            }
                             <div>
-                                <div class="fw-bold">${crypto.name}</div>
-                                <small class="text-muted">${
-                                  crypto.symbol
-                                }</small>
+                                  <div class="fw-bold">${symbol}</div>
+                                  <small class="text-muted">${name}</small>
                             </div>
                         </div>
                     </td>
@@ -588,8 +602,8 @@
     selector.innerHTML = '<option value="">Select a crypto...</option>';
 
     data.forEach((item) => {
-      const crypto = item.cryptos;
-      selector.innerHTML += `<option value="${crypto.symbol}">${crypto.name} (${crypto.symbol})</option>`;
+      // Use cached info directly from watchlist
+      selector.innerHTML += `<option value="${item.symbol}">${item.name} (${item.symbol})</option>`;
     });
 
     // Populate prediction selector
@@ -628,6 +642,7 @@
             .map(
               (crypto) => `
             <button type="button" class="list-group-item list-group-item-action search-result-item" 
+                    data-id="${crypto.id || ""}" 
                     data-symbol="${crypto.symbol}" 
                     data-name="${crypto.name}">
               <div class="d-flex justify-content-between align-items-center">
@@ -644,9 +659,11 @@
           // Add click handlers to search results
           document.querySelectorAll(".search-result-item").forEach((item) => {
             item.addEventListener("click", () => {
+              const cryptoId = item.dataset.id;
               const symbol = item.dataset.symbol;
               const name = item.dataset.name;
 
+              document.getElementById("selectedCryptoId").value = cryptoId;
               selectedCryptoSymbol.value = symbol;
               selectedCryptoName.value = name;
               selectedCryptoText.textContent = `${name} (${symbol})`;
@@ -680,6 +697,8 @@
     .getElementById("addCryptoBtn")
     .addEventListener("click", async () => {
       const symbol = selectedCryptoSymbol.value.trim().toUpperCase();
+      const cryptoName = selectedCryptoName.value;
+      const cryptoId = document.getElementById("selectedCryptoId").value;
       const alertPercent = parseFloat(
         document.getElementById("alertPercent").value
       );
@@ -690,13 +709,24 @@
       }
 
       try {
+        const requestBody = {
+          symbol,
+          alert_percent: alertPercent,
+        };
+
+        // Include api_crypto_id if available
+        if (cryptoId) {
+          requestBody.api_crypto_id = parseInt(cryptoId);
+        }
+
         const response = await apiRequest("/watchlist/add", {
           method: "POST",
-          body: JSON.stringify({ symbol, alert_percent: alertPercent }),
+          body: JSON.stringify(requestBody),
         });
 
         if (response.ok) {
-          showToast("Added to watchlist!", "success");
+          const displayName = cryptoName || symbol;
+          showToast(`${displayName} added to watchlist!`, "success");
           bootstrap.Modal.getInstance(
             document.getElementById("addCryptoModal")
           ).hide();
@@ -704,6 +734,7 @@
           selectedCryptoDiv.style.display = "none";
           selectedCryptoSymbol.value = "";
           selectedCryptoName.value = "";
+          document.getElementById("selectedCryptoId").value = "";
 
           // Reload watchlist and update selectors
           await loadWatchlist();
@@ -771,7 +802,8 @@
 
       if (response.ok) {
         showToast("Removed from watchlist", "success");
-        loadWatchlist();
+        await loadWatchlist();
+        await loadPopularCryptos(); // Refresh popular cryptos to update button states
       } else {
         showToast("Failed to remove", "danger");
       }
@@ -1142,60 +1174,67 @@
   // Load popular cryptocurrencies
   async function loadPopularCryptos() {
     try {
-      const symbols = [
-        "BTC",
-        "ETH",
-        "BNB",
-        "SOL",
-        "XRP",
-        "ADA",
-        "AVAX",
-        "DOGE",
-      ];
-
       const popularTableBody = document.getElementById(
         "popularCryptosTableBody"
       );
       popularTableBody.innerHTML = "";
 
-      // Get all prices in one batch request to avoid rate limiting
-      const priceResponse = await fetch(`${API_BASE}/cryptos/prices`, {
-        method: "POST",
+      // Fetch watched crypto IDs first
+      let watchedIds = [];
+      try {
+        const watchedResponse = await apiRequest("/watchlist/ids");
+        if (watchedResponse.ok) {
+          const watchedData = await watchedResponse.json();
+          watchedIds = watchedData.watched_ids || [];
+          console.log("User is watching crypto IDs:", watchedIds);
+        }
+      } catch (err) {
+        console.error("Error fetching watched IDs:", err);
+      }
+
+      // Fetch top cryptocurrencies from the toplist endpoint
+      const response = await fetch(`${API_BASE}/cryptos/top?limit=10`, {
+        method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ symbols }),
       });
 
-      if (!priceResponse.ok) {
-        throw new Error("Failed to fetch prices");
+      if (!response.ok) {
+        throw new Error("Failed to fetch top cryptocurrencies");
       }
 
-      const allPrices = await priceResponse.json();
+      const result = await response.json();
+      const topCryptos = result.data || [];
+
+      if (topCryptos.length === 0) {
+        throw new Error("No cryptocurrencies data available");
+      }
+
       const rows = [];
 
-      // Get watchlist symbols to check if already added
+      // Check which cryptos are in watchlist by ID
       console.log("Current watchlistData:", watchlistData);
-      const watchlistSymbols = new Set(
-        watchlistData
-          .filter((item) => item.cryptos && item.cryptos.symbol)
-          .map((item) => item.cryptos.symbol)
-      );
-      console.log("Watchlist symbols Set:", Array.from(watchlistSymbols));
+      const watchlistIds = new Set(watchedIds);
+      console.log("Watchlist IDs Set:", Array.from(watchlistIds));
 
       // Create rows for each crypto
-      for (const symbol of symbols) {
-        const data = allPrices[symbol];
+      for (const data of topCryptos) {
         if (!data) continue;
+
+        const isInWatchlist = watchlistIds.has(data.id);
+        console.log(
+          `Crypto ${data.symbol} (ID: ${data.id}) - In watchlist: ${isInWatchlist}`
+        );
 
         const changeClass =
           data.change_24h >= 0 ? "text-success" : "text-danger";
         const changeIcon =
           data.change_24h >= 0 ? "bi-arrow-up" : "bi-arrow-down";
+        const marketCapDisplay = formatNumber(data.market_cap);
+        const volumeDisplay = formatNumber(data.volume_24h);
 
-        // Check if already in watchlist
-        const isInWatchlist = watchlistSymbols.has(symbol);
-        console.log(`${symbol} in watchlist: ${isInWatchlist}`);
+        // Button styling based on watchlist status
         const buttonClass = isInWatchlist
           ? "btn-success"
           : "btn-outline-primary";
@@ -1208,8 +1247,17 @@
         const row = `
           <tr>
             <td>
-              <strong>${data.symbol}</strong>
-              <div class="small text-muted">${data.name}</div>
+              <div class="d-flex align-items-center">
+                ${
+                  data.logo_url
+                    ? `<img src="${data.logo_url}" alt="${data.symbol}" style="width: 32px; height: 32px; margin-right: 8px; border-radius: 50%;" onerror="this.style.display='none'">`
+                    : ""
+                }
+                <div>
+                  <strong>${data.symbol}</strong>
+                  <div class="small text-muted">${data.name}</div>
+                </div>
+              </div>
             </td>
             <td>$${data.price.toLocaleString("en-US", {
               minimumFractionDigits: 2,
@@ -1219,10 +1267,11 @@
               <i class="bi ${changeIcon}"></i>
               ${Math.abs(data.change_24h).toFixed(2)}%
             </td>
-            <td>$${(data.market_cap / 1e9).toFixed(2)}B</td>
-            <td>$${(data.volume_24h / 1e9).toFixed(2)}B</td>
+            <td>$${marketCapDisplay}</td>
+            <td>$${volumeDisplay}</td>
             <td>
               <button class="btn btn-sm ${buttonClass} add-to-watchlist-btn" 
+                      data-id="${data.id}"
                       data-symbol="${data.symbol}"
                       data-name="${data.name}"
                       data-price="${data.price}"
@@ -1269,23 +1318,15 @@
       btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
       try {
-        // Include price data to avoid additional API calls
-        const priceData = {
-          name: name,
-          price: parseFloat(btn.dataset.price),
-          market_cap: parseFloat(btn.dataset.marketCap),
-          volume_24h: parseFloat(btn.dataset.volume),
-          change_24h: parseFloat(btn.dataset.change),
-        };
-
-        console.log(`Adding ${symbol} to watchlist with data:`, priceData);
+        const apiCryptoId = parseInt(btn.dataset.id);
+        console.log(`Adding ${symbol} (ID: ${apiCryptoId}) to watchlist`);
 
         const response = await apiRequest("/watchlist/add", {
           method: "POST",
           body: JSON.stringify({
             symbol,
+            api_crypto_id: apiCryptoId,
             alert_percent: 5.0,
-            price_data: priceData,
           }),
         });
 
@@ -1324,5 +1365,12 @@
   // Load watchlist on page load
   loadWatchlist();
   loadPopularCryptos();
+
+  // Auto-refresh prices every 2 minutes (cache refreshes every 5 minutes)
+  setInterval(() => {
+    console.log("Auto-refreshing prices...");
+    loadWatchlist();
+    loadPopularCryptos();
+  }, 120000); // 2 minutes = 120000ms
 </script>
 {% endblock %}

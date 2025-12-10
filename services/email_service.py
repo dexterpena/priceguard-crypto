@@ -1,5 +1,4 @@
 import logging
-from typing import Dict, List
 
 import requests
 
@@ -95,8 +94,29 @@ class EmailService:
 
         return self.send_email(to_email, subject, html_content)
 
-    def send_daily_summary(self, to_email: str, user_name: str, watchlist_summary: List[Dict],
-                           alerts_triggered: List[Dict], dashboard_url: str) -> bool:
+    def send_watchlist_added(self, to_email: str, crypto_name: str, crypto_symbol: str,
+                             alert_percent: float, dashboard_url: str) -> bool:
+        """Send an email when a crypto is added to watchlist"""
+        subject = f"✅ Added to Watchlist: {crypto_name} ({crypto_symbol})"
+        html_content = f"""
+        <p>{crypto_name} ({crypto_symbol}) was added to your PriceGuard watchlist.</p>
+        <p>Alert threshold: {alert_percent:.2f}%</p>
+        <p><a href="{dashboard_url}">View Dashboard</a></p>
+        """
+        return self.send_email(to_email, subject, html_content)
+
+    def send_watchlist_removed(self, to_email: str, crypto_name: str, crypto_symbol: str,
+                               dashboard_url: str) -> bool:
+        """Send an email when a crypto is removed from watchlist"""
+        subject = f"Removed from Watchlist: {crypto_name} ({crypto_symbol})"
+        html_content = f"""
+        <p>{crypto_name} ({crypto_symbol}) was removed from your PriceGuard watchlist.</p>
+        <p><a href="{dashboard_url}">Open Dashboard</a></p>
+        """
+        return self.send_email(to_email, subject, html_content)
+
+    def send_daily_summary(self, to_email: str, user_name: str, watchlist_summary: list[dict],
+                           alerts_triggered: list[dict], dashboard_url: str) -> bool:
         """Send daily portfolio summary email"""
 
         subject = f"📊 Daily Crypto Summary - {len(watchlist_summary)} Assets"

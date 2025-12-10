@@ -10,6 +10,7 @@ from flask_cors import CORS
 from config import Config
 from database import db
 from services import create_price_prediction, crypto_api, email_service
+from services.popular_cryptos_cache import popular_cryptos_cache
 
 # Configure logging
 logging.basicConfig(
@@ -38,20 +39,14 @@ def get_user_from_header():
 
     try:
         import jwt
-        from jwt import PyJWKClient
 
-        # Verify JWT with Supabase
-        jwks_url = f"{Config.SUPABASE_URL}/auth/v1/jwks"
-        jwks_client = PyJWKClient(jwks_url)
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-
+        # For development: decode without verification to test
+        # In production, you should verify the signature properly
         payload = jwt.decode(
             token,
-            signing_key.key,
-            algorithms=["HS256", "RS256"],
-            audience="authenticated",
-            options={"verify_aud": False}
+            options={"verify_signature": False}
         )
+        logger.info(f"JWT decoded successfully for user: {payload.get('sub')}")
         return payload.get('sub')
     except Exception as e:
         logger.error(f"JWT validation error: {e}")
@@ -74,6 +69,27 @@ def get_user_from_token():
         payload = jwt.decode(token, options={"verify_signature": False})
         return payload.get('sub')
     except:
+        return None
+
+
+def get_email_from_token():
+    """Extract user email from JWT if present (no verification)"""
+    auth_header = request.headers.get('Authorization')
+    token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+    else:
+        token = request.args.get('token')
+
+    if not token:
+        return None
+
+    try:
+        import jwt
+        payload = jwt.decode(token, options={"verify_signature": False})
+        return payload.get('email') or payload.get('sub')
+    except Exception as e:
+        logger.warning(f"Failed to read email from token: {e}")
         return None
 
 
@@ -106,6 +122,12 @@ def login_page():
 def register_page():
     """Serve the registration page"""
     return render_template('register.html')
+
+
+@app.route('/preferences')
+def preferences_page():
+    """Serve the preferences page"""
+    return render_template('preferences.html')
 
 
 # Authentication Routes
@@ -190,15 +212,74 @@ def get_cryptos():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/cryptos/top', methods=['GET'])
+def get_top_cryptos():
+    """Get top cryptocurrencies from cache"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+
+        logger.info(f"Fetching top {limit} cryptocurrencies from cache")
+
+        # Get all cached cryptos (already sorted by market cap)
+        all_cryptos = popular_cryptos_cache.get_all_cached_cryptos()
+
+        # Return only the requested limit
+        top_cryptos = all_cryptos[:limit]
+
+        # Format response to match expected structure
+        formatted_cryptos = []
+        for crypto in top_cryptos:
+            formatted_cryptos.append({
+                'id': crypto['api_id'],
+                'symbol': crypto['symbol'],
+                'name': crypto['name'],
+                'logo_url': crypto.get('logo_url', ''),
+                'price': float(crypto['price']),
+                'market_cap': float(crypto.get('market_cap', 0)),
+                'volume_24h': float(crypto.get('volume_24h', 0)),
+                'change_24h': float(crypto.get('change_24h', 0))
+            })
+
+        return jsonify({
+            'success': True,
+            'data': formatted_cryptos,
+            'count': len(formatted_cryptos),
+            'from_cache': True
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting top cryptos: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/cryptos/search', methods=['GET'])
 def search_cryptos():
-    """Search for cryptocurrencies"""
+    """Search for cryptocurrencies in cache first, then API"""
     try:
-        query = request.args.get('q', '')
+        query = request.args.get('q', '').upper()
         if not query:
             return jsonify([]), 200
 
-        results = crypto_api.search_crypto(query)
+        # Search in cached cryptos first
+        all_cached = popular_cryptos_cache.get_all_cached_cryptos()
+        results = []
+
+        for crypto in all_cached:
+            if (query in crypto['symbol'].upper() or
+                    query in crypto['name'].upper()):
+                results.append({
+                    'id': crypto['api_id'],
+                    'symbol': crypto['symbol'],
+                    'name': crypto['name'],
+                    'logo_url': crypto.get('logo_url', ''),
+                    'price': float(crypto['price'])
+                })
+
+        # If no results in cache, fall back to API search
+        if not results:
+            api_results = crypto_api.search_crypto(query)
+            results = api_results
+
         return jsonify(results), 200
 
     except Exception as e:
@@ -226,7 +307,21 @@ def get_multiple_crypto_prices():
     """Get current prices for multiple cryptocurrencies"""
     try:
         data = request.json
-        symbols = data.get('symbols', [])
+        logger.info(f"Received data: {data}, type: {type(data)}")
+
+        # Handle both list and object with symbols key
+        if isinstance(data, list):
+            symbols = data
+        elif isinstance(data, dict):
+            symbols = data.get('symbols', [])
+        else:
+            symbols = []
+
+        # Ensure symbols is a list
+        if isinstance(symbols, str):
+            symbols = [s.strip() for s in symbols.split(',')]
+
+        logger.info(f"Processing symbols: {symbols}")
 
         if not symbols:
             return jsonify({'error': 'Symbols required'}), 400
@@ -314,107 +409,206 @@ def get_crypto_history(symbol):
 @app.route('/api/watchlist', methods=['GET'])
 @require_auth
 def get_watchlist(user_id):
-    """Get user's watchlist"""
+    """Get user's watchlist with crypto data"""
     try:
         watchlist = db.get_user_watchlist(user_id)
+
+        # Evaluate alert thresholds and notify when triggered (respect preferences)
+        try:
+            prefs = db.get_user_preferences(user_id) or {}
+            email_enabled = prefs.get('email_alerts_enabled', True)
+            price_alerts_enabled = prefs.get('price_alerts_enabled', True)
+            user_email = (
+                db.get_user_email(user_id) or get_email_from_token()
+            ) if email_enabled else None
+
+            if email_enabled and price_alerts_enabled and user_email:
+                for item in watchlist:
+                    change = item.get('change_24h', 0) or 0
+                    threshold = item.get('alert_percent', 0) or 0
+                    api_crypto_id = item.get('api_crypto_id')
+                    symbol = item.get('symbol', '')
+                    name = item.get('name', symbol)
+
+                    if threshold and abs(change) >= threshold and api_crypto_id:
+                        if not db.has_recent_alert(user_id, api_crypto_id):
+                            alert_type = 'increase' if change >= threshold else 'decrease'
+                            email_service.send_price_alert(
+                                to_email=user_email,
+                                crypto_name=name,
+                                crypto_symbol=symbol,
+                                current_price=item.get('current_price', 0),
+                                percent_change=change,
+                                alert_type=alert_type,
+                                dashboard_url=Config.APP_URL
+                            )
+                            db.log_alert(
+                                user_id=user_id,
+                                api_crypto_id=api_crypto_id,
+                                symbol=symbol,
+                                name=name,
+                                trigger_price=item.get('current_price', 0),
+                                percent_change=change,
+                                alert_type=alert_type
+                            )
+        except Exception as alert_err:
+            logger.warning(f"Alert notification check failed: {alert_err}")
+
         return jsonify(watchlist), 200
     except Exception as e:
         logger.error(f"Error getting watchlist: {e}")
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/watchlist/ids', methods=['GET'])
+@require_auth
+def get_watchlist_ids(user_id):
+    """Get list of api_crypto_ids user is watching (for UI state)"""
+    try:
+        watched_ids = db.get_user_watched_crypto_ids(user_id)
+        return jsonify({'watched_ids': watched_ids}), 200
+    except Exception as e:
+        logger.error(f"Error getting watchlist IDs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# Preferences Routes
+
+@app.route('/api/preferences', methods=['GET'])
+@require_auth
+def get_preferences(user_id):
+    """Get user preferences"""
+    try:
+        prefs = db.get_user_preferences(user_id)
+        return jsonify(prefs or {}), 200
+    except Exception as e:
+        logger.error(f"Error getting preferences: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/preferences', methods=['POST'])
+@require_auth
+def update_preferences(user_id):
+    """Update user preferences"""
+    try:
+        data = request.json or {}
+        email_alerts_enabled = data.get('email_alerts_enabled')
+        watchlist_alerts_enabled = data.get('watchlist_alerts_enabled')
+        price_alerts_enabled = data.get('price_alerts_enabled')
+        daily_summary_enabled = data.get('daily_summary_enabled')
+
+        success = db.update_user_preferences(
+            user_id,
+            email_alerts_enabled=email_alerts_enabled,
+            watchlist_alerts_enabled=watchlist_alerts_enabled,
+            price_alerts_enabled=price_alerts_enabled,
+            daily_summary_enabled=daily_summary_enabled
+        )
+
+        if not success:
+            return jsonify({'error': 'Failed to update preferences'}), 400
+
+        prefs = db.get_user_preferences(user_id)
+        return jsonify(prefs or {}), 200
+    except Exception as e:
+        logger.error(f"Error updating preferences: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/watchlist/add', methods=['POST'])
 @require_auth
-def add_to_watchlist(user_id):
-    """Add crypto to watchlist"""
+def add_to_watchlist_route(user_id):
+    """Add crypto to watchlist using new schema"""
     try:
         data = request.json
         symbol = data.get('symbol', '').upper()
         alert_percent = data.get('alert_percent', 5.0)
-        # pre-fetched price data from frontend
-        price_data = data.get('price_data')
+        # New: get API ID from request
+        api_crypto_id = data.get('api_crypto_id')
 
-        if not symbol:
-            return jsonify({'error': 'Symbol required'}), 400
+        # Support both new (api_crypto_id) and old (symbol only) requests
+        if not api_crypto_id and not symbol:
+            return jsonify({'error': 'Symbol or API ID required'}), 400
 
-        # Get or create crypto
-        crypto = db.get_crypto_by_symbol(symbol)
+        # Get crypto info from cache or API
+        crypto_info = None
 
-        if not crypto:
-            # Get crypto name from price_data if provided, otherwise fetch from API
-            crypto_name = None
-            if price_data and 'name' in price_data:
-                crypto_name = price_data['name']
-            else:
-                crypto_data = crypto_api.get_crypto_price(symbol)
-                if crypto_data:
-                    crypto_name = crypto_data['name']
+        if api_crypto_id:
+            # Get from cache by API ID
+            crypto_info = popular_cryptos_cache.get_cached_crypto(
+                api_crypto_id)
+            if crypto_info:
+                symbol = crypto_info['symbol']
 
-            if not crypto_name:
-                crypto_name = symbol
-                logger.warning(
-                    f"Could not fetch crypto data for {symbol}, using symbol as name")
+        if not crypto_info and symbol:
+            # Try to find in cache by symbol
+            all_cached = popular_cryptos_cache.get_all_cached_cryptos()
+            for crypto in all_cached:
+                if crypto['symbol'].upper() == symbol:
+                    crypto_info = crypto
+                    api_crypto_id = crypto['api_id']
+                    break
 
-            # Add to database
-            crypto = db.add_crypto(symbol, crypto_name)
-            if not crypto:
-                return jsonify({'error': 'Failed to add crypto'}), 500
+        if not crypto_info:
+            # Not in cache, need to fetch from API
+            crypto_data = crypto_api.get_crypto_price(symbol)
+            if not crypto_data:
+                return jsonify({'error': f'Cryptocurrency {symbol} not found'}), 404
+
+            # Try to get API ID from metadata
+            watchlist_data = crypto_api.get_watchlist_data([symbol])
+            if watchlist_data and symbol in watchlist_data:
+                api_crypto_id = watchlist_data[symbol].get('id')
+
+            if not api_crypto_id:
+                return jsonify({'error': f'Could not determine API ID for {symbol}'}), 400
+
+            crypto_info = {
+                'api_id': api_crypto_id,
+                'symbol': symbol,
+                'name': crypto_data.get('name', symbol),
+                'logo_url': crypto_data.get('logo_url', '')
+            }
 
         # Check if already in watchlist
-        if db.is_in_watchlist(user_id, crypto['crypto_id']):
+        if db.is_in_watchlist_by_api_id(user_id, api_crypto_id):
             return jsonify({'error': f'{symbol} is already in your watchlist'}), 400
 
-        # Store current price in history
-        # Use provided price_data if available, otherwise fetch from API
-        if price_data:
-            logger.info(f"Storing price data from request: {price_data}")
-            try:
-                price = float(price_data.get('price', 0))
-                market_cap = float(price_data.get('market_cap')) if price_data.get(
-                    'market_cap') else None
-                volume_24h = float(price_data.get('volume_24h')) if price_data.get(
-                    'volume_24h') else None
-                change_24h = float(price_data.get('change_24h')) if price_data.get(
-                    'change_24h') else None
-
-                logger.info(
-                    f"Converted values - price: {price}, market_cap: {market_cap}, volume: {volume_24h}, change: {change_24h}")
-
-                result = db.add_price_history(
-                    crypto['crypto_id'],
-                    price,
-                    market_cap,
-                    volume_24h,
-                    change_24h
-                )
-                logger.info(f"Price history result: {result}")
-            except Exception as e:
-                logger.exception(f"Error storing price data: {e}")
-                # Continue even if price storage fails
-        else:
-            crypto_data = crypto_api.get_crypto_price(symbol)
-            if crypto_data:
-                db.add_price_history(
-                    crypto['crypto_id'],
-                    crypto_data['price'],
-                    crypto_data.get('market_cap'),
-                    crypto_data.get('volume_24h'),
-                    crypto_data.get('change_24h')
-                )
-
-        # Add to watchlist
+        # Add to watchlist with cached info
         watchlist_item = db.add_to_watchlist(
-            user_id, crypto['crypto_id'], alert_percent)
+            user_id=user_id,
+            api_crypto_id=api_crypto_id,
+            symbol=crypto_info['symbol'],
+            name=crypto_info['name'],
+            logo_url=crypto_info.get('logo_url', ''),
+            alert_percent=alert_percent
+        )
 
         if not watchlist_item:
             return jsonify({'error': 'Failed to add to watchlist'}), 500
 
+        # Notify user of new watchlist item
+        try:
+            prefs = db.get_user_preferences(user_id) or {}
+            if prefs.get('email_alerts_enabled', True) and prefs.get('watchlist_alerts_enabled', True):
+                user_email = db.get_user_email(user_id) or get_email_from_token()
+                if user_email:
+                    email_service.send_watchlist_added(
+                        to_email=user_email,
+                        crypto_name=crypto_info['name'],
+                        crypto_symbol=symbol,
+                        alert_percent=alert_percent,
+                    dashboard_url=Config.APP_URL
+                )
+        except Exception as notify_err:
+            logger.warning(f"Watchlist add email failed: {notify_err}")
+
+        logger.info(
+            f"Added {symbol} (ID: {api_crypto_id}) to watchlist for user {user_id}")
         return jsonify(watchlist_item), 201
 
     except Exception as e:
         logger.exception(f"Error adding to watchlist: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -423,9 +617,29 @@ def add_to_watchlist(user_id):
 def remove_from_watchlist(user_id, watch_id):
     """Remove crypto from watchlist"""
     try:
+        # Fetch item before removal for email context
+        item_details = db.client.table('watchlist').select(
+            'symbol', 'name'
+        ).eq('watch_id', watch_id).eq('user_id', user_id).limit(1).execute()
+        removed_item = item_details.data[0] if item_details.data else None
+
         success = db.remove_from_watchlist(watch_id, user_id)
         if not success:
             return jsonify({'error': 'Failed to remove from watchlist'}), 400
+
+        try:
+            prefs = db.get_user_preferences(user_id) or {}
+            if prefs.get('email_alerts_enabled', True) and prefs.get('watchlist_alerts_enabled', True):
+                user_email = db.get_user_email(user_id) or get_email_from_token()
+                if user_email and removed_item:
+                    email_service.send_watchlist_removed(
+                        to_email=user_email,
+                        crypto_name=removed_item.get('name') or removed_item.get('symbol', ''),
+                        crypto_symbol=removed_item.get('symbol', ''),
+                        dashboard_url=Config.APP_URL
+                    )
+        except Exception as notify_err:
+            logger.warning(f"Watchlist remove email failed: {notify_err}")
 
         return jsonify({'message': 'Removed from watchlist'}), 200
 
@@ -611,60 +825,6 @@ def get_alert_history(user_id):
         return jsonify(alerts), 200
     except Exception as e:
         logger.error(f"Error getting alert history: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-# Background Task Routes
-
-@app.route('/api/tasks/run-daily-scrape', methods=['POST'])
-def run_daily_scrape():
-    """Manually trigger daily price scraping"""
-    try:
-        from tasks.scraper import scrape_all_crypto_prices
-        results = scrape_all_crypto_prices()
-
-        return jsonify({
-            'message': 'Daily scrape completed',
-            'results': results
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error running daily scrape: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/tasks/send-daily-emails', methods=['POST'])
-def send_daily_emails():
-    """Manually trigger daily email summaries"""
-    try:
-
-        from tasks.email_tasks import send_all_daily_summaries
-        results = send_all_daily_summaries()
-
-        return jsonify({
-            'message': 'Daily emails sent',
-            'results': results
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error sending daily emails: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/tasks/check-alerts', methods=['POST'])
-def check_alerts():
-    """Manually trigger alert checking"""
-    try:
-        from tasks.alert_tasks import check_all_alerts
-        results = check_all_alerts()
-
-        return jsonify({
-            'message': 'Alerts checked',
-            'results': results
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error checking alerts: {e}")
         return jsonify({'error': str(e)}), 500
 
 

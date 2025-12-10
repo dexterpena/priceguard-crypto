@@ -17,16 +17,17 @@ class Config:
     SUPABASE_URL = os.getenv('SUPABASE_URL')
     SUPABASE_KEY = os.getenv('SUPABASE_KEY')
     SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY')
+    SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET')
 
     # Resend
     RESEND_API_KEY = os.getenv('RESEND_API_KEY')
     RESEND_FROM_EMAIL = os.getenv(
         'RESEND_FROM_EMAIL', 'noreply@priceguard.com')
 
-    # Crypto API
-    CRYPTO_API_BASE_URL = os.getenv(
-        'CRYPTO_API_BASE_URL', 'https://api.freecryptoapi.com/v1')
-    COINDESK_API_KEY = os.getenv('COINDESK_API')
+    # CoinDesk API
+    COINDESK_API_URL = os.getenv(
+        'COINDESK_API_URL', 'https://data-api.coindesk.com')
+    COINDESK_API_KEY = os.getenv('COINDESK_API_KEY')
 
     # Application
     APP_URL = os.getenv('APP_URL', 'http://localhost:8000')

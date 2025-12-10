@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Preferences - PriceGuard{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header bg-white">
+          <h5 class="mb-0"><i class="bi bi-gear"></i> Email Preferences</h5>
+        </div>
+        <div class="card-body">
+          <p class="text-muted">
+            Choose when you want to receive emails from PriceGuard. You can unsubscribe anytime.
+          </p>
+          <form id="preferencesForm">
+            <div class="form-check form-switch mb-3">
+              <input class="form-check-input" type="checkbox" id="emailAlertsEnabled">
+              <label class="form-check-label" for="emailAlertsEnabled">
+                Enable all email notifications
+              </label>
+            </div>
+
+            <div class="ms-4">
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="watchlistAlertsEnabled">
+                <label class="form-check-label" for="watchlistAlertsEnabled">
+                  Watchlist updates (add/remove)
+                </label>
+              </div>
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="priceAlertsEnabled">
+                <label class="form-check-label" for="priceAlertsEnabled">
+                  Price alerts (threshold reached)
+                </label>
+              </div>
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="dailySummaryEnabled">
+                <label class="form-check-label" for="dailySummaryEnabled">
+                  Daily summary email
+                </label>
+              </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+              <button type="submit" class="btn btn-primary">Save Preferences</button>
+              <button type="button" class="btn btn-outline-secondary" id="unsubscribeAll">
+                Unsubscribe from all
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  if (!checkAuth()) {
+    window.location.href = "/login";
+  }
+
+  const emailToggle = document.getElementById("emailAlertsEnabled");
+  const watchlistToggle = document.getElementById("watchlistAlertsEnabled");
+  const priceToggle = document.getElementById("priceAlertsEnabled");
+  const dailyToggle = document.getElementById("dailySummaryEnabled");
+
+  async function loadPreferences() {
+    try {
+      const response = await apiRequest("/preferences");
+      if (!response || !response.ok) throw new Error("Failed to load preferences");
+      const prefs = await response.json();
+
+      emailToggle.checked = prefs.email_alerts_enabled ?? true;
+      watchlistToggle.checked = prefs.watchlist_alerts_enabled ?? true;
+      priceToggle.checked = prefs.price_alerts_enabled ?? true;
+      dailyToggle.checked = prefs.daily_summary_enabled ?? true;
+    } catch (err) {
+      console.error(err);
+      showToast("Could not load preferences", "danger");
+    }
+  }
+
+  document.getElementById("preferencesForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const response = await apiRequest("/preferences", {
+        method: "POST",
+        body: JSON.stringify({
+          email_alerts_enabled: emailToggle.checked,
+          watchlist_alerts_enabled: watchlistToggle.checked,
+          price_alerts_enabled: priceToggle.checked,
+          daily_summary_enabled: dailyToggle.checked,
+        }),
+      });
+
+      if (response.ok) {
+        showToast("Preferences saved", "success");
+      } else {
+        showToast("Failed to save preferences", "danger");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Error saving preferences", "danger");
+    }
+  });
+
+  // If master toggle is turned on, enable all options
+  emailToggle.addEventListener("change", () => {
+    if (emailToggle.checked) {
+      watchlistToggle.checked = true;
+      priceToggle.checked = true;
+      dailyToggle.checked = true;
+    }
+  });
+
+  document.getElementById("unsubscribeAll").addEventListener("click", async () => {
+    emailToggle.checked = false;
+    watchlistToggle.checked = false;
+    priceToggle.checked = false;
+    dailyToggle.checked = false;
+    document.getElementById("preferencesForm").dispatchEvent(new Event("submit"));
+  });
+
+  loadPreferences();
+</script>
+{% endblock %}

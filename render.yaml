@@ -3,6 +3,7 @@ services:
     name: priceguard-crypto
     env: python
     plan: starter
+    autoDeploy: true
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /
@@ -23,7 +24,7 @@ services:
         sync: false
       - key: FLASK_SECRET_KEY
         sync: false
-      - key: COINDESK_API
+      - key: COINDESK_API_KEY
         sync: false
       - key: APP_URL
         sync: false
@@ -32,9 +33,10 @@ services:
     name: priceguard-scheduler
     env: python
     plan: starter
+    autoDeploy: true
     buildCommand: pip install -r requirements.txt
     schedule: "0 * * * *"
-    startCommand: python -c "from tasks.alert_tasks import check_all_alerts; check_all_alerts()"
+    startCommand: python cache_refresher.py --once
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.14
@@ -48,5 +50,5 @@ services:
         sync: false
       - key: RESEND_FROM_EMAIL
         sync: false
-      - key: COINDESK_API
+      - key: COINDESK_API_KEY
         sync: false

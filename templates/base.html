@@ -124,19 +124,34 @@
 
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav ms-auto">
-            <li class="nav-item">
+            <li class="nav-item nav-auth">
               <a class="nav-link" href="/">
                 <i class="bi bi-speedometer2"></i> Dashboard
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item nav-auth">
+              <a class="nav-link" href="/preferences">
+                <i class="bi bi-gear"></i> Preferences
+              </a>
+            </li>
+            <li class="nav-item nav-auth">
               <a class="nav-link" href="#" id="refreshBtn">
                 <i class="bi bi-arrow-clockwise"></i> Refresh
               </a>
             </li>
-            <li class="nav-item">
+            <li class="nav-item nav-auth">
               <a class="nav-link" href="#" onclick="logout()">
                 <i class="bi bi-box-arrow-right"></i> Logout
+              </a>
+            </li>
+            <li class="nav-item nav-guest">
+              <a class="nav-link" href="/login">
+                <i class="bi bi-box-arrow-in-right"></i> Login
+              </a>
+            </li>
+            <li class="nav-item nav-guest">
+              <a class="nav-link" href="/register">
+                <i class="bi bi-person-plus"></i> Register
               </a>
             </li>
           </ul>
@@ -163,11 +178,13 @@
       // Set auth token
       function setAuthToken(token) {
         localStorage.setItem("auth_token", token);
+        updateNavLinks();
       }
 
       // Clear auth token
       function clearAuthToken() {
         localStorage.removeItem("auth_token");
+        updateNavLinks();
       }
 
       // Check authentication
@@ -185,6 +202,19 @@
         clearAuthToken();
         window.location.href = "/login";
       }
+
+      // Toggle nav visibility based on auth
+      function updateNavLinks() {
+        const authed = !!getAuthToken();
+        document.querySelectorAll(".nav-auth").forEach((el) => {
+          el.classList.toggle("d-none", !authed);
+        });
+        document.querySelectorAll(".nav-guest").forEach((el) => {
+          el.classList.toggle("d-none", authed);
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", updateNavLinks);
 
       // Make authenticated API request
       async function apiRequest(endpoint, options = {}) {
@@ -233,10 +263,11 @@
 
       // Format large numbers
       function formatNumber(num) {
-        if (num >= 1e12) return (num / 1e12).toFixed(2) + "T";
-        if (num >= 1e9) return (num / 1e9).toFixed(2) + "B";
-        if (num >= 1e6) return (num / 1e6).toFixed(2) + "M";
-        if (num >= 1e3) return (num / 1e3).toFixed(2) + "K";
+        const value = Number(num) || 0;
+        if (value >= 1e12) return (value / 1e12).toFixed(2) + "T";
+        if (value >= 1e9) return (value / 1e9).toFixed(2) + "B";
+        if (value >= 1e6) return (value / 1e6).toFixed(2) + "M";
+        if (value >= 1e3) return (value / 1e3).toFixed(2) + "K";
         return num.toFixed(2);
       }
 

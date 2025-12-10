@@ -1,7 +1,6 @@
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -43,7 +42,7 @@ class PricePredictionModel:
         self.is_trained = False
         self.metrics = {}
 
-    def prepare_features(self, price_history: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
+    def prepare_features(self, price_history: list[dict]) -> tuple[np.ndarray, np.ndarray]:
         """
         Prepare features from price history
 
@@ -78,7 +77,7 @@ class PricePredictionModel:
 
         return X, y, df
 
-    def train(self, price_history: List[Dict]) -> Dict:
+    def train(self, price_history: list[dict]) -> dict:
         """
         Train the model on historical price data
 
@@ -127,7 +126,7 @@ class PricePredictionModel:
             logger.error(f"Error training model: {e}")
             raise
 
-    def predict_next_days(self, price_history: List[Dict], days: int = 7) -> List[Dict]:
+    def predict_next_days(self, price_history: list[dict], days: int = 7) -> list[dict]:
         """
         Predict prices for the next N days
 
@@ -182,7 +181,7 @@ class PricePredictionModel:
             logger.error(f"Error making predictions: {e}")
             raise
 
-    def plot_predictions(self, price_history: List[Dict], predictions: List[Dict],
+    def plot_predictions(self, price_history: list[dict], predictions: list[dict],
                          crypto_symbol: str, output_path: str) -> str:
         """
         Create a plot comparing historical prices and predictions
@@ -238,7 +237,7 @@ class PricePredictionModel:
             logger.error(f"Error creating prediction plot: {e}")
             raise
 
-    def get_model_info(self) -> Dict:
+    def get_model_info(self) -> dict:
         """Get model information and metrics"""
         return {
             'model_type': self.model_type,
@@ -247,16 +246,16 @@ class PricePredictionModel:
         }
 
 
-def create_price_prediction(price_history: List[Dict], crypto_symbol: str,
+def create_price_prediction(price_history: list[dict], crypto_symbol: str,
                             prediction_days: int = 7, model_type: str = 'linear',
-                            output_dir: str = 'static/predictions') -> Dict:
+                            output_dir: str = 'static/predictions') -> dict:
     """
     Convenience function to create a complete price prediction
 
     Returns:
         {
-            'predictions': List[Dict],
-            'metrics': Dict,
+            'predictions': list[dict],
+            'metrics': dict,
             'plot_path': str
         }
     """

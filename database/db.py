@@ -1,8 +1,7 @@
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
 
 from supabase import Client, create_client
-from supabase.lib.client_options import ClientOptions
 
 from config import Config
 
@@ -17,17 +16,13 @@ class SupabaseDB:
             Config.SUPABASE_URL,
             Config.SUPABASE_KEY
         )
-        # Create service client with proper options for server-side admin operations
+        # Create service client for server-side admin operations
         self.service_client: Client = create_client(
             Config.SUPABASE_URL,
-            Config.SUPABASE_SERVICE_KEY,
-            options=ClientOptions(
-                auto_refresh_token=False,
-                persist_session=False
-            )
+            Config.SUPABASE_SERVICE_KEY
         ) if Config.SUPABASE_SERVICE_KEY else None
 
-    def get_user_email(self, user_id: str) -> Optional[str]:
+    def get_user_email(self, user_id: str) -> str | None:
         """Get user email from Supabase Auth"""
         try:
             if not self.service_client:
@@ -43,110 +38,99 @@ class SupabaseDB:
             logger.error(f"Error getting user email: {e}")
             return None
 
-    # Crypto Operations
-
-    def get_crypto_by_symbol(self, symbol: str) -> Optional[Dict]:
-        """Get crypto by symbol"""
-        try:
-            response = self.client.table('cryptos').select(
-                '*').eq('symbol', symbol.upper()).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error getting crypto by symbol: {e}")
-            return None
-
-    def get_crypto_by_id(self, crypto_id: int) -> Optional[Dict]:
-        """Get crypto by ID"""
-        try:
-            response = self.client.table('cryptos').select(
-                '*').eq('crypto_id', crypto_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error getting crypto by ID: {e}")
-            return None
-
-    def get_all_cryptos(self) -> List[Dict]:
-        """Get all cryptos"""
-        try:
-            response = self.client.table('cryptos').select('*').execute()
-            return response.data
-        except Exception as e:
-            logger.error(f"Error getting all cryptos: {e}")
-            return []
-
-    def add_crypto(self, symbol: str, name: str) -> Optional[Dict]:
-        """Add a new crypto"""
-        try:
-            response = self.client.table('cryptos').insert({
-                'symbol': symbol.upper(),
-                'name': name
-            }).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error adding crypto: {e}")
-            return None
-
     # Watchlist Operations
 
-    def get_user_watchlist(self, user_id: str) -> List[Dict]:
-        """Get user's watchlist with crypto details and latest prices"""
+    def get_user_watchlist(self, user_id: str) -> list[dict]:
+        """Get user's watchlist with cached crypto info and live prices"""
         try:
+            # Get watchlist with cached data
             response = self.client.table('watchlist').select(
-                '*, cryptos(*)'
-            ).eq('user_id', user_id).execute()
+                '*'
+            ).eq('user_id', user_id).order('date_added', desc=True).execute()
 
-            # Enrich with latest prices
             watchlist = response.data
             logger.info(
                 f"Found {len(watchlist)} watchlist items for user {user_id}")
 
+            # Enrich with latest prices from cache
             for item in watchlist:
-                crypto_id = item['crypto_id']
-                crypto_symbol = item['cryptos']['symbol'] if item.get(
-                    'cryptos') else 'Unknown'
+                api_crypto_id = item['api_crypto_id']
 
-                latest_price = self.get_latest_price(crypto_id)
-                if latest_price:
-                    item['current_price'] = latest_price['price']
-                    item['change_24h'] = latest_price.get('change_24h', 0)
-                    item['market_cap'] = latest_price.get('market_cap', 0)
-                    item['volume_24h'] = latest_price.get('volume_24h', 0)
+                # Get latest price from popular_cryptos cache
+                crypto_cache = self.client.table('popular_cryptos').select(
+                    'price', 'change_24h', 'market_cap', 'volume_24h'
+                ).eq('api_id', api_crypto_id).execute()
+
+                if crypto_cache.data and len(crypto_cache.data) > 0:
+                    cached_data = crypto_cache.data[0]
+                    item['current_price'] = float(cached_data['price'])
+                    item['change_24h'] = float(
+                        cached_data.get('change_24h', 0))
+                    item['market_cap'] = float(
+                        cached_data.get('market_cap', 0))
+                    item['volume_24h'] = float(
+                        cached_data.get('volume_24h', 0))
                     logger.info(
-                        f"{crypto_symbol}: price=${latest_price['price']}, change={latest_price.get('change_24h', 0)}%")
+                        f"{item['symbol']}: price=${cached_data['price']}, change={cached_data.get('change_24h', 0)}%")
                 else:
+                    # Fallback: fetch from API
                     logger.warning(
-                        f"No price data found for {crypto_symbol} (crypto_id={crypto_id})")
+                        f"No cached price for {item['symbol']} (api_id={api_crypto_id}), will use API")
+                    item['current_price'] = 0
+                    item['change_24h'] = 0
+                    item['market_cap'] = 0
+                    item['volume_24h'] = 0
+
+            # Sort by market cap descending to match popular cryptos
+            watchlist.sort(
+                key=lambda x: float(x.get('market_cap') or 0),
+                reverse=True
+            )
 
             return watchlist
         except Exception as e:
             logger.error(f"Error getting user watchlist: {e}")
             return []
 
-    def is_in_watchlist(self, user_id: str, crypto_id: int) -> bool:
-        """Check if crypto is already in user's watchlist"""
+    def get_user_watched_crypto_ids(self, user_id: str) -> list[int]:
+        """Get list of api_crypto_ids that user is watching"""
         try:
-            response = self.client.table('watchlist').select('watch_id').eq(
-                'user_id', user_id
-            ).eq('crypto_id', crypto_id).execute()
-            return len(response.data) > 0
+            response = self.client.table('watchlist').select(
+                'api_crypto_id'
+            ).eq('user_id', user_id).execute()
+            return [item['api_crypto_id'] for item in response.data]
         except Exception as e:
-            logger.error(f"Error checking watchlist: {e}")
-            return False
+            logger.error(f"Error getting watched crypto IDs: {e}")
+            return []
 
-    def add_to_watchlist(self, user_id: str, crypto_id: int, alert_percent: float = 5.0) -> Optional[Dict]:
-        """Add crypto to user's watchlist"""
+    def add_to_watchlist(self, user_id: str, api_crypto_id: int, symbol: str, name: str, logo_url: str = '', alert_percent: float = 5.0) -> dict | None:
+        """Add crypto to user's watchlist with cached info"""
         try:
             # Use service client to bypass RLS since we've already authenticated the user
             client = self.service_client if self.service_client else self.client
             response = client.table('watchlist').insert({
                 'user_id': user_id,
-                'crypto_id': crypto_id,
+                'api_crypto_id': api_crypto_id,
+                'symbol': symbol,
+                'name': name,
+                'logo_url': logo_url,
                 'alert_percent': alert_percent
             }).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"Error adding to watchlist: {e}")
             return None
+
+    def is_in_watchlist_by_api_id(self, user_id: str, api_crypto_id: int) -> bool:
+        """Check if crypto is already in user's watchlist by API ID"""
+        try:
+            client = self.service_client if self.service_client else self.client
+            response = client.table('watchlist').select('watch_id').eq(
+                'user_id', user_id).eq('api_crypto_id', api_crypto_id).execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"Error checking watchlist: {e}")
+            return False
 
     def remove_from_watchlist(self, watch_id: int, user_id: str) -> bool:
         """Remove crypto from user's watchlist"""
@@ -173,169 +157,98 @@ class SupabaseDB:
             logger.error(f"Error updating alert threshold: {e}")
             return False
 
-    # Price History Operations
+    # Alerts
 
-    def get_latest_price(self, crypto_id: int) -> Optional[Dict]:
-        """Get latest price for a crypto"""
+    def log_alert(self, user_id: str, api_crypto_id: int, symbol: str, name: str,
+                  trigger_price: float, percent_change: float, alert_type: str) -> bool:
+        """Record a triggered alert"""
         try:
-            response = self.client.table('price_history').select('*').eq(
-                'crypto_id', crypto_id
-            ).order('timestamp', desc=True).limit(1).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"Error getting latest price: {e}")
-            return None
-
-    def get_price_history(self, crypto_id: int, days: int = 30) -> List[Dict]:
-        """Get price history for last N days"""
-        try:
-            from datetime import datetime, timedelta, timezone
-
-            # Calculate the date N days ago
-            cutoff_date = (datetime.now(timezone.utc) -
-                           timedelta(days=days)).isoformat()
-
-            response = self.client.table('price_history').select('*').eq(
-                'crypto_id', crypto_id
-            ).gte('timestamp', cutoff_date).order('timestamp', desc=False).execute()
-            return response.data
-        except Exception as e:
-            logger.error(f"Error getting price history: {e}")
-            return []
-
-    def add_price_history(self, crypto_id: int, price: float, market_cap: float = None,
-                          volume_24h: float = None, change_24h: float = None) -> Optional[Dict]:
-        """Add price history record"""
-        try:
-            data = {
-                'crypto_id': crypto_id,
-                'price': price
-            }
-            if market_cap is not None:
-                data['market_cap'] = market_cap
-            if volume_24h is not None:
-                data['volume_24h'] = volume_24h
-            if change_24h is not None:
-                data['change_24h'] = change_24h
-
-            logger.info(
-                f"Adding price history for crypto_id={crypto_id}: ${price}, change={change_24h}%")
-
-            # Use service client to bypass RLS for system operations
             client = self.service_client if self.service_client else self.client
-            response = client.table(
-                'price_history').insert(data).execute()
-
-            result = response.data[0] if response.data else None
-            if result:
-                logger.info(
-                    f"Successfully added price history record: {result}")
-            else:
-                logger.warning(f"Price history insert returned no data")
-
-            return result
-        except Exception as e:
-            logger.error(f"Error adding price history: {e}")
-            return None
-
-    def bulk_insert_price_history(self, records: List[Dict]) -> bool:
-        """Bulk insert price history records"""
-        try:
-            if not records:
-                return True
-            response = self.service_client.table(
-                'price_history').insert(records).execute()
-            return True
-        except Exception as e:
-            logger.error(f"Error bulk inserting price history: {e}")
-            return False
-
-    # Alerts Operations
-
-    def log_alert(self, user_id: str, crypto_id: int, trigger_price: float,
-                  percent_change: float, alert_type: str) -> Optional[Dict]:
-        """Log a price alert"""
-        try:
-            response = self.client.table('alerts_log').insert({
+            client.table('alerts_log').insert({
                 'user_id': user_id,
-                'crypto_id': crypto_id,
+                'api_crypto_id': api_crypto_id,
+                'symbol': symbol,
+                'name': name,
                 'trigger_price': trigger_price,
                 'percent_change': percent_change,
                 'alert_type': alert_type
             }).execute()
-            return response.data[0] if response.data else None
+            return True
         except Exception as e:
             logger.error(f"Error logging alert: {e}")
-            return None
+            return False
 
-    def get_user_alerts(self, user_id: str, limit: int = 50) -> List[Dict]:
-        """Get user's alert history"""
+    def has_recent_alert(self, user_id: str, api_crypto_id: int, lookback_hours: int = 24) -> bool:
+        """Check if an alert was logged recently to avoid duplicate emails"""
         try:
-            response = self.client.table('alerts_log').select(
-                '*, cryptos(*)'
-            ).eq('user_id', user_id).order('timestamp', desc=True).limit(limit).execute()
-            return response.data
+            since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+            client = self.service_client if self.service_client else self.client
+            result = client.table('alerts_log').select('alert_id').eq(
+                'user_id', user_id
+            ).eq('api_crypto_id', api_crypto_id).gte('timestamp', since.isoformat()).limit(1).execute()
+            return bool(result.data)
         except Exception as e:
-            logger.error(f"Error getting user alerts: {e}")
-            return []
+            logger.error(f"Error checking recent alerts: {e}")
+            return False
 
-    def get_all_watchlist_items(self) -> List[Dict]:
-        """Get all watchlist items (for background tasks, using service key)"""
+    def get_user_alerts(self, user_id: str) -> list[dict]:
+        """Fetch user's alert history"""
         try:
-            if not self.service_client:
-                logger.error("Service client not available")
-                return []
-
-            response = self.service_client.table('watchlist').select(
-                '*, cryptos(*)'
-            ).execute()
-            return response.data
+            result = self.client.table('alerts_log').select('*').eq(
+                'user_id', user_id).order('timestamp', desc=True).execute()
+            return result.data if result.data else []
         except Exception as e:
-            logger.error(f"Error getting all watchlist items: {e}")
+            logger.error(f"Error fetching alert history: {e}")
             return []
 
     # User Preferences
 
-    def get_user_preferences(self, user_id: str) -> Optional[Dict]:
-        """Get user preferences"""
+    def get_user_preferences(self, user_id: str) -> dict | None:
+        """Fetch or create default user preferences"""
         try:
             response = self.client.table('user_preferences').select(
                 '*').eq('user_id', user_id).execute()
             if response.data:
                 return response.data[0]
-            else:
-                # Create default preferences
-                return self.create_user_preferences(user_id)
+            return self.create_user_preferences(user_id)
         except Exception as e:
             logger.error(f"Error getting user preferences: {e}")
             return None
 
-    def create_user_preferences(self, user_id: str) -> Optional[Dict]:
-        """Create default user preferences"""
+    def create_user_preferences(self, user_id: str) -> dict | None:
+        """Create default preferences for a user"""
         try:
             response = self.client.table('user_preferences').insert({
                 'user_id': user_id,
                 'email_alerts_enabled': True,
-                'daily_summary_enabled': True
+                'daily_summary_enabled': True,
+                'watchlist_alerts_enabled': True,
+                'price_alerts_enabled': True
             }).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"Error creating user preferences: {e}")
             return None
 
-    def update_user_preferences(self, user_id: str, email_alerts_enabled: bool = None,
-                                daily_summary_enabled: bool = None) -> bool:
-        """Update user preferences"""
-        try:
-            data = {}
-            if email_alerts_enabled is not None:
-                data['email_alerts_enabled'] = email_alerts_enabled
-            if daily_summary_enabled is not None:
-                data['daily_summary_enabled'] = daily_summary_enabled
+    def update_user_preferences(self, user_id: str, **prefs) -> bool:
+        """Update user preferences fields"""
+        allowed = {
+            'email_alerts_enabled',
+            'daily_summary_enabled',
+            'watchlist_alerts_enabled',
+            'price_alerts_enabled'
+        }
+        updates = {k: v for k, v in prefs.items() if k in allowed}
 
-            if data:
-                self.client.table('user_preferences').update(
-                    data).eq('user_id', user_id).execute()
+        if not updates:
+            return True
+
+        try:
+            updates['updated_at'] = datetime.now(timezone.utc).isoformat()
+            self.client.table('user_preferences').upsert({
+                'user_id': user_id,
+                **updates
+            }).execute()
             return True
         except Exception as e:
             logger.error(f"Error updating user preferences: {e}")
