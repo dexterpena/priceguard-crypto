@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Cache Refresher Service - Separate process for updating popular_cryptos cache.
-Run this separately from the Flask app.
+Cache Refresher Service - Separate process for updating popular_cryptos cache. Run separately from Flask.
 
 Usage:
     python cache_refresher.py           # Run continuously with 5-minute intervals

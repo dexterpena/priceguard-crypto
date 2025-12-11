@@ -52,17 +52,6 @@ class CryptoAPIService:
     def get_crypto_price(self, symbol: str) -> dict | None:
         """
         Get current price and details for a cryptocurrency using asset metadata
-
-        Returns:
-            {
-                'symbol': str,
-                'name': str,
-                'price': float,
-                'market_cap': float,
-                'volume_24h': float,
-                'change_24h': float,
-                'timestamp': str
-            }
         """
         try:
             symbol = symbol.upper()
@@ -125,12 +114,6 @@ class CryptoAPIService:
     def get_multiple_crypto_prices(self, symbols: list[str]) -> dict[str, dict]:
         """
         Get current prices for multiple cryptocurrencies using asset metadata
-
-        Returns:
-            {
-                'BTC': {...},
-                'ETH': {...}
-            }
         """
         try:
             results = {}
@@ -181,26 +164,6 @@ class CryptoAPIService:
     def get_historical_data(self, symbol: str, days: int = 30, unit: str = 'days') -> list[dict]:
         """
         Get historical price data for a cryptocurrency
-
-        Args:
-            symbol: Cryptocurrency symbol
-            days: Number of time periods to fetch
-            unit: 'hours' for 24h view, 'days' for others
-
-        Returns:
-            [
-                {
-                    'price': float,
-                    'market_cap': float,
-                    'volume_24h': float,
-                    'timestamp': str,
-                    'open': float,
-                    'high': float,
-                    'low': float,
-                    'close': float
-                },
-                ...
-            ]
         """
         try:
             symbol = symbol.upper()
@@ -263,16 +226,6 @@ class CryptoAPIService:
     def search_crypto(self, query: str) -> list[dict]:
         """
         Search for cryptocurrencies by name or symbol
-
-        Returns:
-            [
-                {
-                    'id': str,
-                    'symbol': str,
-                    'name': str
-                },
-                ...
-            ]
         """
         try:
             query = query.upper()
@@ -300,24 +253,6 @@ class CryptoAPIService:
     def get_top_cryptos(self, limit: int = 100, page: int = 1) -> list[dict]:
         """
         Get top cryptocurrencies by market cap using CoinDesk toplist endpoint
-
-        Args:
-            limit: Number of cryptocurrencies to fetch (default: 100, max: 100)
-            page: Page number for pagination (default: 1)
-
-        Returns:
-            [
-                {
-                    'symbol': str,
-                    'name': str,
-                    'price': float,
-                    'market_cap': float,
-                    'volume_24h': float,
-                    'change_24h': float,
-                    'logo_url': str
-                },
-                ...
-            ]
         """
         try:
             # Check cache first
@@ -383,17 +318,6 @@ class CryptoAPIService:
     def get_crypto_with_logo(self, symbol: str) -> dict | None:
         """
         Get cryptocurrency details including logo from CoinDesk asset management API
-
-        Args:
-            symbol: Cryptocurrency symbol (e.g., 'BTC', 'ETH')
-
-        Returns:
-            {
-                'symbol': str,
-                'name': str,
-                'logo_url': str,
-                'id': int
-            } or None if not found
         """
         try:
             symbol = symbol.upper()
@@ -441,23 +365,6 @@ class CryptoAPIService:
     def get_watchlist_data(self, symbols: list[str]) -> dict[str, dict]:
         """
         Get detailed metadata for multiple cryptocurrencies for watchlist display
-
-        Args:
-            symbols: List of cryptocurrency symbols (e.g., ['BTC', 'ETH'])
-
-        Returns:
-            {
-                'BTC': {
-                    'symbol': str,
-                    'name': str,
-                    'logo_url': str,
-                    'price': float,
-                    'change_24h': float,
-                    'market_cap': float,
-                    'volume_24h': float
-                },
-                ...
-            }
         """
         try:
             if not symbols:
@@ -515,5 +422,4 @@ class CryptoAPIService:
             return {}
 
 
-# Singleton instance
 crypto_api = CryptoAPIService()

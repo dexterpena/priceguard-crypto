@@ -40,8 +40,7 @@ def get_user_from_header():
     try:
         import jwt
 
-        # For development: decode without verification to test
-        # In production, you should verify the signature properly
+        # TODO: verify for production
         payload = jwt.decode(
             token,
             options={"verify_signature": False}
@@ -220,7 +219,7 @@ def get_top_cryptos():
 
         logger.info(f"Fetching top {limit} cryptocurrencies from cache")
 
-        # Get all cached cryptos (already sorted by market cap)
+        # Get all cached cryptos
         all_cryptos = popular_cryptos_cache.get_all_cached_cryptos()
 
         # Return only the requested limit
@@ -413,7 +412,8 @@ def get_watchlist(user_id):
     try:
         # Use token for RLS when service role unavailable
         auth_header = request.headers.get('Authorization', '')
-        user_token = auth_header.split(' ')[1] if auth_header.startswith('Bearer ') else None
+        user_token = auth_header.split(
+            ' ')[1] if auth_header.startswith('Bearer ') else None
 
         watchlist = db.get_user_watchlist(user_id, user_token=user_token)
 
@@ -532,7 +532,7 @@ def add_to_watchlist_route(user_id):
         data = request.json
         symbol = data.get('symbol', '').upper()
         alert_percent = data.get('alert_percent', 5.0)
-        # New: get API ID from request
+        # get API ID from request
         api_crypto_id = data.get('api_crypto_id')
 
         # Support both new (api_crypto_id) and old (symbol only) requests
@@ -600,15 +600,16 @@ def add_to_watchlist_route(user_id):
         try:
             prefs = db.get_user_preferences(user_id) or {}
             if prefs.get('email_alerts_enabled', True) and prefs.get('watchlist_alerts_enabled', True):
-                user_email = db.get_user_email(user_id) or get_email_from_token()
+                user_email = db.get_user_email(
+                    user_id) or get_email_from_token()
                 if user_email:
                     email_service.send_watchlist_added(
                         to_email=user_email,
                         crypto_name=crypto_info['name'],
                         crypto_symbol=symbol,
                         alert_percent=alert_percent,
-                    dashboard_url=Config.APP_URL
-                )
+                        dashboard_url=Config.APP_URL
+                    )
         except Exception as notify_err:
             logger.warning(f"Watchlist add email failed: {notify_err}")
 
@@ -639,11 +640,13 @@ def remove_from_watchlist(user_id, watch_id):
         try:
             prefs = db.get_user_preferences(user_id) or {}
             if prefs.get('email_alerts_enabled', True) and prefs.get('watchlist_alerts_enabled', True):
-                user_email = db.get_user_email(user_id) or get_email_from_token()
+                user_email = db.get_user_email(
+                    user_id) or get_email_from_token()
                 if user_email and removed_item:
                     email_service.send_watchlist_removed(
                         to_email=user_email,
-                        crypto_name=removed_item.get('name') or removed_item.get('symbol', ''),
+                        crypto_name=removed_item.get(
+                            'name') or removed_item.get('symbol', ''),
                         crypto_symbol=removed_item.get('symbol', ''),
                         dashboard_url=Config.APP_URL
                     )

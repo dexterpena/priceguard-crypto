@@ -203,5 +203,4 @@ class EmailService:
         return self.send_email(to_email, subject, html_content)
 
 
-# Singleton instance
 email_service = EmailService()

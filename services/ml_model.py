@@ -26,9 +26,6 @@ class PricePredictionModel:
     def __init__(self, model_type: str = 'linear'):
         """
         Initialize prediction model
-
-        Args:
-            model_type: 'linear' for Linear Regression or 'tree' for Decision Tree
         """
         self.model_type = model_type
 
@@ -80,9 +77,6 @@ class PricePredictionModel:
     def train(self, price_history: list[dict]) -> dict:
         """
         Train the model on historical price data
-
-        Returns:
-            Dictionary with training metrics (RMSE, MAE, R²)
         """
         try:
             X, y, df = self.prepare_features(price_history)
@@ -129,9 +123,6 @@ class PricePredictionModel:
     def predict_next_days(self, price_history: list[dict], days: int = 7) -> list[dict]:
         """
         Predict prices for the next N days
-
-        Returns:
-            List of predictions with dates and predicted prices
         """
         if not self.is_trained:
             raise ValueError("Model must be trained before making predictions")
@@ -185,9 +176,6 @@ class PricePredictionModel:
                          crypto_symbol: str, output_path: str) -> str:
         """
         Create a plot comparing historical prices and predictions
-
-        Returns:
-            Path to the saved plot image
         """
         try:
             # Prepare historical data
@@ -251,13 +239,6 @@ def create_price_prediction(price_history: list[dict], crypto_symbol: str,
                             output_dir: str = 'static/predictions') -> dict:
     """
     Convenience function to create a complete price prediction
-
-    Returns:
-        {
-            'predictions': list[dict],
-            'metrics': dict,
-            'plot_path': str
-        }
     """
     try:
         # Create model

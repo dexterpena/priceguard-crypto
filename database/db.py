@@ -55,9 +55,11 @@ class SupabaseDB:
                         '*'
                     ).eq('user_id', user_id).order('date_added', desc=True).execute()
                     watchlist = response.data or []
-                    logger.info(f"Watchlist fetched via user token: {len(watchlist)} items")
+                    logger.info(
+                        f"Watchlist fetched via user token: {len(watchlist)} items")
                 except Exception as e:
-                    logger.warning(f"Anon watchlist fetch failed, will try service client: {e}")
+                    logger.warning(
+                        f"Anon watchlist fetch failed, will try service client: {e}")
 
             # Fallback to service client if available or if no items returned
             if self.service_client and (not watchlist):
@@ -65,9 +67,11 @@ class SupabaseDB:
                     '*'
                 ).eq('user_id', user_id).order('date_added', desc=True).execute()
                 watchlist = response.data or []
-                logger.info(f"Watchlist fetched via service role: {len(watchlist)} items")
+                logger.info(
+                    f"Watchlist fetched via service role: {len(watchlist)} items")
 
-            logger.info(f"Found {len(watchlist)} watchlist items for user {user_id}")
+            logger.info(
+                f"Found {len(watchlist)} watchlist items for user {user_id}")
 
             # Enrich with latest prices from cache
             for item in watchlist:
@@ -103,7 +107,8 @@ class SupabaseDB:
                         item['market_cap'] = 0
                         item['volume_24h'] = 0
                 except Exception as enrich_err:
-                    logger.warning(f"Enrichment failed for {item.get('symbol')}: {enrich_err}")
+                    logger.warning(
+                        f"Enrichment failed for {item.get('symbol')}: {enrich_err}")
                     item['current_price'] = item.get('current_price', 0)
                     item['change_24h'] = item.get('change_24h', 0)
                     item['market_cap'] = item.get('market_cap', 0)
@@ -124,7 +129,6 @@ class SupabaseDB:
         """Get list of api_crypto_ids that user is watching"""
         try:
             client = self.service_client if self.service_client else self.client
-            # No user_token here; used for UI state only, RLS covered by service role or anon token not needed
             response = client.table('watchlist').select(
                 'api_crypto_id'
             ).eq('user_id', user_id).execute()
@@ -136,7 +140,7 @@ class SupabaseDB:
     def add_to_watchlist(self, user_id: str, api_crypto_id: int, symbol: str, name: str, logo_url: str = '', alert_percent: float = 5.0) -> dict | None:
         """Add crypto to user's watchlist with cached info"""
         try:
-            # Use service client to bypass RLS since we've already authenticated the user
+            # Use service client to bypass RLS since the user is already authenticated
             client = self.service_client if self.service_client else self.client
             response = client.table('watchlist').insert({
                 'user_id': user_id,
@@ -165,7 +169,7 @@ class SupabaseDB:
     def remove_from_watchlist(self, watch_id: int, user_id: str) -> bool:
         """Remove crypto from user's watchlist"""
         try:
-            # Use service client to bypass RLS since we've already authenticated the user
+            # Use service client to bypass RLS since the user is already authenticated
             client = self.service_client if self.service_client else self.client
             client.table('watchlist').delete().eq(
                 'watch_id', watch_id).eq('user_id', user_id).execute()
@@ -177,7 +181,7 @@ class SupabaseDB:
     def update_alert_threshold(self, watch_id: int, user_id: str, alert_percent: float) -> bool:
         """Update alert threshold for a watchlist item"""
         try:
-            # Use service client to bypass RLS since we've already authenticated the user
+            # Use service client to bypass RLS since the user is already authenticated
             client = self.service_client if self.service_client else self.client
             client.table('watchlist').update({
                 'alert_percent': alert_percent
@@ -211,7 +215,8 @@ class SupabaseDB:
     def has_recent_alert(self, user_id: str, api_crypto_id: int, lookback_hours: int = 24) -> bool:
         """Check if an alert was logged recently to avoid duplicate emails"""
         try:
-            since = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+            since = datetime.now(timezone.utc) - \
+                timedelta(hours=lookback_hours)
             client = self.service_client if self.service_client else self.client
             result = client.table('alerts_log').select('alert_id').eq(
                 'user_id', user_id
@@ -245,7 +250,8 @@ class SupabaseDB:
                     if response.data:
                         return response.data[0]
                 except Exception as e:
-                    logger.warning(f"Anon preferences fetch failed, will try service client: {e}")
+                    logger.warning(
+                        f"Anon preferences fetch failed, will try service client: {e}")
 
             # Fallback to service client if available
             client = self.service_client if self.service_client else self.client

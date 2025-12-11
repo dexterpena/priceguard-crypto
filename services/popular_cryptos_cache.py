@@ -25,17 +25,6 @@ class PopularCryptosCacheService:
     def refresh_popular_cryptos(self, limit: int = 100) -> dict:
         """
         Fetch top cryptocurrencies from API and cache in database
-
-        Args:
-            limit: Number of top cryptos to cache (default: 100)
-
-        Returns:
-            {
-                'success': bool,
-                'cached_count': int,
-                'updated_count': int,
-                'error': str (optional)
-            }
         """
         try:
             logger.info(
@@ -56,11 +45,10 @@ class PopularCryptosCacheService:
             cached_count = 0
             updated_count = 0
 
-            # Upsert each crypto into the database
+            # Insert/update each crypto into the database
             for crypto in top_cryptos:
                 try:
                     # Get API ID from toplist response
-                    # Note: The toplist API should include ID field
                     api_id = crypto.get('id') or self._get_api_id_from_symbol(
                         crypto['symbol'])
 
@@ -69,7 +57,7 @@ class PopularCryptosCacheService:
                             f"Could not determine API ID for {crypto['symbol']}, skipping")
                         continue
 
-                    # Prepare data for upsert
+                    # Prepare data for insertion/update
                     data = {
                         'api_id': api_id,
                         'symbol': crypto['symbol'],
@@ -83,7 +71,7 @@ class PopularCryptosCacheService:
                         'updated_at': datetime.now(timezone.utc).isoformat()
                     }
 
-                    # Upsert into database
+                    # Insert/update into database
                     result = self.db.service_client.table('popular_cryptos').upsert(
                         data,
                         on_conflict='api_id'
@@ -124,12 +112,6 @@ class PopularCryptosCacheService:
     def _get_api_id_from_symbol(self, symbol: str) -> int | None:
         """
         Fetch API ID for a crypto by symbol using the metadata endpoint
-
-        Args:
-            symbol: Crypto symbol (e.g., 'BTC')
-
-        Returns:
-            API ID or None if not found
         """
         try:
             # Use the watchlist data endpoint which returns ID
@@ -150,12 +132,6 @@ class PopularCryptosCacheService:
     def _is_newly_cached(self, api_id: int) -> bool:
         """
         Check if a crypto was just cached (cached_at is recent)
-
-        Args:
-            api_id: CoinDesk API ID
-
-        Returns:
-            True if newly cached (within last minute), False otherwise
         """
         try:
             result = self.db.service_client.table('popular_cryptos').select(
@@ -208,9 +184,6 @@ class PopularCryptosCacheService:
     def get_all_cached_cryptos(self) -> list[dict]:
         """
         Get all cached popular cryptocurrencies
-
-        Returns:
-            List of crypto data dicts
         """
         try:
             result = self.db.client.table('popular_cryptos').select(
@@ -223,5 +196,4 @@ class PopularCryptosCacheService:
             return []
 
 
-# Singleton instance
 popular_cryptos_cache = PopularCryptosCacheService()
